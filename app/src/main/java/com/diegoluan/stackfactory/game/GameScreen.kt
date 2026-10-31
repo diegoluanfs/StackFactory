@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -50,6 +51,9 @@ import com.diegoluan.stackfactory.daily.DailyMissionManager
 import kotlinx.coroutines.delay
 import kotlin.math.max
 import kotlin.math.min
+import com.diegoluan.stackfactory.game.skills.SkillCard
+import com.diegoluan.stackfactory.game.skills.SkillDeck
+import com.diegoluan.stackfactory.game.skills.SkillType
 
 private data class TowerBlock(
     val x: Float,
@@ -61,7 +65,8 @@ fun GameScreen(
     onMissionUpdated: () -> Unit = {},
     onBackToMenu: () -> Unit,
     onGameFinished: () -> Unit = {},
-    onProceedAfterGameOver: (() -> Unit) -> Unit = { proceed -> proceed() }
+    onProceedAfterGameOver: (() -> Unit) -> Unit = { proceed -> proceed() },
+    onRewardedRecovery: (onEarned: () -> Unit) -> Unit = {}
 ) {
 
     val context = LocalContext.current
@@ -123,6 +128,19 @@ fun GameScreen(
     var isPaused by remember {
         mutableStateOf(false)
     }
+
+    // Progressão e poderes: sempre zerados quando uma nova partida começa.
+    var lives by remember { mutableIntStateOf(3) }
+    var shield by remember { mutableIntStateOf(0) }
+    var xp by remember { mutableIntStateOf(0) }
+    var level by remember { mutableIntStateOf(1) }
+    var xpBonus by remember { mutableIntStateOf(0) }
+    var slowBlocks by remember { mutableIntStateOf(0) }
+    var widthRecoveryCharges by remember { mutableIntStateOf(0) }
+    var rewardedContinueUsed by remember { mutableStateOf(false) }
+    var pickingSkill by remember { mutableStateOf(false) }
+    var cardChoices by remember { mutableStateOf<List<SkillCard>>(emptyList()) }
+    val xpGoal = 80 + (level - 1) * 35
 
     /*
      * =========================================================
@@ -229,6 +247,16 @@ fun GameScreen(
     ) {
 
         score = 0
+        lives = 3
+        shield = 0
+        xp = 0
+        level = 1
+        xpBonus = 0
+        slowBlocks = 0
+        widthRecoveryCharges = 0
+        rewardedContinueUsed = false
+        pickingSkill = false
+        cardChoices = emptyList()
 
         gameOver = false
 
@@ -366,6 +394,8 @@ fun GameScreen(
         LaunchedEffect(
             gameOver,
             isPaused,
+            pickingSkill,
+            slowBlocks,
             gameWidthPx,
             movingBlockWidth
         ) {
@@ -403,7 +433,8 @@ fun GameScreen(
              */
             while (
                 !gameOver &&
-                !isPaused
+                !isPaused &&
+                !pickingSkill
             ) {
 
                 delay(16)
@@ -412,6 +443,7 @@ fun GameScreen(
                     with(density) {
                         movementSpeedDp.toPx()
                     } *
+                            (if (slowBlocks > 0) 0.60f else 1f) *
                             movingDirection
 
                 /*
@@ -464,7 +496,7 @@ fun GameScreen(
              * Se estiver pausado,
              * não faz nada.
              */
-            if (isPaused) {
+            if (isPaused || pickingSkill) {
                 return
             }
 
@@ -539,12 +571,21 @@ fun GameScreen(
              * o jogador perdeu.
              */
             if (overlapWidth <= 0f) {
-
-                gameOver = true
-                missionManager.onGameFinished()
-                onMissionUpdated()
-                onGameFinished()
-
+                if (shield > 0) {
+                    shield--
+                } else {
+                    lives--
+                }
+                if (lives <= 0) {
+                    gameOver = true
+                    missionManager.onGameFinished()
+                    onMissionUpdated()
+                    onGameFinished()
+                } else {
+                    // Errou, mas a partida não acaba: bloco volta ao início.
+                    movingBlockX = 0f
+                    movingDirection = 1f
+                }
                 return
             }
 
@@ -574,11 +615,17 @@ fun GameScreen(
              * =================================================
              */
 
+            // Uma carga de seguro impede uma redução excessiva na largura.
+            val adjustedWidth = if (widthRecoveryCharges > 0 &&
+                overlapWidth < previousBlock.width * 0.70f) {
+                widthRecoveryCharges--
+                previousBlock.width.coerceAtMost(blockWidthPx)
+            } else overlapWidth
             towerBlocks =
                 towerBlocks +
                         TowerBlock(
                             x = newX,
-                            width = overlapWidth
+                            width = adjustedWidth
                         )
 
             /*
@@ -592,7 +639,7 @@ fun GameScreen(
              * o próximo bloco terá 140px.
              */
             movingBlockWidth =
-                overlapWidth
+                adjustedWidth
 
             /*
              * =================================================
@@ -601,6 +648,17 @@ fun GameScreen(
              */
 
             score++
+            if (slowBlocks > 0) slowBlocks--
+            // Encaixe próximo da largura anterior recebe bônus de precisão.
+            val earnedXp = 10 + xpBonus +
+                (if (overlapWidth >= previousBlock.width * 0.97f) 5 else 0)
+            xp += earnedXp
+            if (xp >= xpGoal) {
+                xp -= xpGoal
+                level++
+                cardChoices = SkillDeck.draw(3)
+                pickingSkill = true
+            }
             missionManager.onBlockPlaced()
             missionManager.onScoreChanged(score)
             onMissionUpdated()
@@ -660,6 +718,25 @@ fun GameScreen(
                                 cameraStepDp.toPx()
                             }
             }
+        }
+
+        // Escolher uma carta aplica o efeito na partida atual.
+        fun activateSkill(card: SkillCard) {
+            when (card.type) {
+                SkillType.RESTORE_WIDTH -> {
+                    val target = blockWidthPx.coerceAtMost(gameWidthPx)
+                    val top = towerBlocks.last()
+                    towerBlocks = towerBlocks.dropLast(1) + top.copy(width = target)
+                    movingBlockWidth = target
+                    movingBlockX = movingBlockX.coerceIn(0f, (gameWidthPx - target).coerceAtLeast(0f))
+                }
+                SkillType.EXTRA_LIFE -> lives = (lives + 1).coerceAtMost(5)
+                SkillType.SHIELD -> shield++
+                SkillType.SLOW_TIME -> slowBlocks += 5
+                SkillType.XP_BOOST -> xpBonus += 3
+                SkillType.WIDTH_INSURANCE -> widthRecoveryCharges++
+            }
+            pickingSkill = false
         }
 
         /*
@@ -846,6 +923,21 @@ fun GameScreen(
                 modifier =
                     Modifier.height(14.dp)
             )
+
+            Text(
+                text = "❤ $lives    🛡 $shield    NÍVEL $level  •  $xp / $xpGoal XP",
+                color = Color.White,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(6.dp))
+            LinearProgressIndicator(
+                progress = { (xp.toFloat() / xpGoal).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(8.dp)),
+                color = Color(0xFF60A5FA),
+                trackColor = Color.White.copy(alpha = 0.25f)
+            )
+            Spacer(Modifier.height(10.dp))
 
             /*
              * =================================================
@@ -1138,6 +1230,28 @@ fun GameScreen(
                                     )
                             )
 
+                            if (!rewardedContinueUsed) {
+                                OutlinedButton(
+                                    onClick = {
+                                        onRewardedRecovery {
+                                            rewardedContinueUsed = true
+                                            gameOver = false
+                                            lives = 1
+                                            val top = towerBlocks.last()
+                                            val restored = blockWidthPx.coerceAtMost(gameWidthPx)
+                                            towerBlocks = towerBlocks.dropLast(1) + top.copy(width = restored)
+                                            movingBlockWidth = restored
+                                            movingBlockX = 0f
+                                            movingDirection = 1f
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("REVIVER COM ANÚNCIO", fontWeight = FontWeight.Bold)
+                                }
+                                Spacer(Modifier.height(12.dp))
+                            }
+
                             Button(
                                 onClick = {
                                     onProceedAfterGameOver {
@@ -1216,6 +1330,36 @@ fun GameScreen(
                 textAlign =
                     TextAlign.Center
             )
+        }
+        if (pickingSkill && !gameOver) {
+            Box(
+                modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.82f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(20.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(Color(0xFF16233B)).padding(18.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("NÍVEL $level ALCANÇADO!", color = Color(0xFFFBBF24),
+                        fontSize = 21.sp, fontWeight = FontWeight.Bold)
+                    Text("Escolha uma habilidade gratuita", color = Color.White, fontSize = 14.sp)
+                    cardChoices.forEach { card ->
+                        Box(modifier = Modifier.fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFF293E60))
+                            .clickable { activateSkill(card) }.padding(15.dp)) {
+                            Column {
+                                Text(card.name, color = Color(0xFFBFDBFE),
+                                    fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                Text(card.description, color = Color.White, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

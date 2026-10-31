@@ -13,11 +13,13 @@ android {
 
     defaultConfig {
         applicationId = "com.diegoluan.stackfactory"
+
         minSdk = 24
         targetSdk = 37
 
-        versionCode = 3
-        versionName = "1.1.0"
+        // StackFactory - XP, Cartas e Skills
+        versionCode = 4
+        versionName = "1.2.0"
 
         testInstrumentationRunner =
             "androidx.test.runner.AndroidJUnitRunner"
@@ -25,6 +27,7 @@ android {
 
     buildTypes {
         release {
+            // Mantemos a configuração já validada
             optimization {
                 enable = false
             }
@@ -42,7 +45,11 @@ android {
 }
 
 dependencies {
-    // Jetpack Compose - BOM único
+
+    // =========================================
+    // JETPACK COMPOSE
+    // =========================================
+
     implementation(platform(libs.androidx.compose.bom))
 
     implementation(libs.androidx.activity.compose)
@@ -51,33 +58,87 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
 
-    // AndroidX
+    // =========================================
+    // ANDROIDX
+    // =========================================
+
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
-    // Notificações e tarefas agendadas
-    implementation("androidx.work:work-runtime-ktx:2.10.5")
+    // =========================================
+    // NOTIFICAÇÕES E TAREFAS AGENDADAS
+    // =========================================
 
-    // Google AdMob
+    implementation(
+        "androidx.work:work-runtime-ktx:2.10.5"
+    )
+
+    // =========================================
+    // GOOGLE ADMOB
+    // =========================================
+
     implementation(
         "com.google.android.gms:play-services-ads:25.5.0"
     )
 
-    // Consentimento de anúncios - Google UMP
+    // Consentimento e privacidade
     implementation(
         "com.google.android.ump:user-messaging-platform:4.0.0"
     )
 
-    // Testes unitários
+    // =========================================
+    // GOOGLE PLAY IN-APP UPDATES
+    // =========================================
+
+    implementation(
+        "com.google.android.play:app-update:2.1.0"
+    )
+
+    implementation(
+        "com.google.android.play:app-update-ktx:2.1.0"
+    )
+
+    // =========================================
+    // CORREÇÃO ANDROIDX FRAGMENT
+    // =========================================
+
+    constraints {
+        implementation("androidx.fragment:fragment:1.9.1") {
+            because(
+                "Atualizar Fragment e corrigir aviso de SDK desatualizado da Google Play"
+            )
+        }
+    }
+
+    // =========================================
+    // TESTES
+    // =========================================
+
     testImplementation(libs.junit)
 
-    // Testes instrumentados
-    androidTestImplementation(platform(libs.androidx.compose.bom))
-    androidTestImplementation(libs.androidx.compose.ui.test.junit4)
-    androidTestImplementation(libs.androidx.espresso.core)
+    androidTestImplementation(
+        platform(libs.androidx.compose.bom)
+    )
+
+    androidTestImplementation(
+        libs.androidx.compose.ui.test.junit4
+    )
+
+    androidTestImplementation(
+        libs.androidx.espresso.core
+    )
+
     androidTestImplementation(libs.androidx.junit)
 
-    // Ferramentas de desenvolvimento
-    debugImplementation(libs.androidx.compose.ui.test.manifest)
-    debugImplementation(libs.androidx.compose.ui.tooling)
+    // =========================================
+    // DEBUG E FERRAMENTAS
+    // =========================================
+
+    debugImplementation(
+        libs.androidx.compose.ui.test.manifest
+    )
+
+    debugImplementation(
+        libs.androidx.compose.ui.tooling
+    )
 }

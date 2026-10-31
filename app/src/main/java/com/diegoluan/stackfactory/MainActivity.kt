@@ -11,6 +11,10 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import com.google.android.play.core.appupdate.AppUpdateManagerFactory
+import com.google.android.play.core.appupdate.AppUpdateOptions
+import com.google.android.play.core.install.model.AppUpdateType
+import com.google.android.play.core.install.model.UpdateAvailability
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -52,6 +56,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.diegoluan.stackfactory.ads.RewardedAdManager
 import com.diegoluan.stackfactory.ads.AdManager
 import com.diegoluan.stackfactory.ads.BannerAd
 import com.diegoluan.stackfactory.daily.DailyMission
@@ -68,10 +73,22 @@ import com.google.android.ump.ConsentInformation
 private const val LOG_TAG = "StackFactory"
 
 class MainActivity : ComponentActivity() {
+    private lateinit var rewardedAdManager: RewardedAdManager
     private lateinit var adManager: AdManager
     private var adsReady by mutableStateOf(false)
     private var privacyRequired by mutableStateOf(false)
     private var initializingAds = false
+
+    private val inAppUpdateManager by lazy { AppUpdateManagerFactory.create(this) }
+    private val updateLauncher = registerForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode != RESULT_OK) {
+            Log.i(LOG_TAG, "Atualização não concluída: código ${result.resultCode}")
+            // O Google Play pode permitir que o usuário recuse a atualização.
+            // Não repetimos a solicitação em loop.
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -84,18 +101,72 @@ class MainActivity : ComponentActivity() {
         }
 
         adManager = AdManager(this)
+        rewardedAdManager = RewardedAdManager(this)
         requestAdsConsent()
+        checkForPlayUpdate()
 
         setContent {
             StackFactoryTheme {
                 StackFactoryApp(
                     adManager = adManager,
+                    rewardedAdManager = rewardedAdManager,
                     adsReady = adsReady,
                     privacyRequired = privacyRequired,
                     onPrivacyOptions = { showPrivacyOptions() }
                 )
             }
         }
+    }
+
+    /**
+     * Consulta a Play Store e inicia uma atualização imediata, quando disponível.
+     * Aplica-se a instalações compatíveis com o Google Play; não força instalação
+     * silenciosa nem impede que o jogador cancele.
+     */
+    private fun checkForPlayUpdate() {
+        inAppUpdateManager.appUpdateInfo
+            .addOnSuccessListener { info ->
+                if (info.updateAvailability() == UpdateAvailability.UPDATE_AVAILABLE &&
+                    info.isUpdateTypeAllowed(AppUpdateType.IMMEDIATE)
+                ) {
+                    try {
+                        inAppUpdateManager.startUpdateFlowForResult(
+                            info,
+                            updateLauncher,
+                            AppUpdateOptions.newBuilder(AppUpdateType.IMMEDIATE).build()
+                        )
+                    } catch (error: Exception) {
+                        Log.w(LOG_TAG, "Não foi possível iniciar a atualização", error)
+                    }
+                }
+            }
+            .addOnFailureListener { error ->
+                Log.d(LOG_TAG, "Atualização pela Play Store indisponível", error)
+            }
+    }
+
+    /** Retoma atualização imediata iniciada anteriormente, se interrompida. */
+    override fun onResume() {
+        super.onResume()
+        inAppUpdateManager.appUpdateInfo
+            .addOnSuccessListener { info ->
+                if (info.updateAvailability() ==
+                    UpdateAvailability.DEVELOPER_TRIGGERED_UPDATE_IN_PROGRESS
+                ) {
+                    try {
+                        inAppUpdateManager.startUpdateFlowForResult(
+                            info,
+                            updateLauncher,
+                            AppUpdateOptions.newBuilder(AppUpdateType.IMMEDIATE).build()
+                        )
+                    } catch (error: Exception) {
+                        Log.w(LOG_TAG, "Não foi possível retomar a atualização", error)
+                    }
+                }
+            }
+            .addOnFailureListener { error ->
+                Log.d(LOG_TAG, "Verificação de atualização em andamento indisponível", error)
+            }
     }
 
     private fun requestAdsConsent() {
@@ -123,7 +194,7 @@ class MainActivity : ComponentActivity() {
     private fun updatePrivacyOptions() {
         val info = UserMessagingPlatform.getConsentInformation(this)
         privacyRequired = info.privacyOptionsRequirementStatus ==
-            ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED
+                ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED
     }
 
     private fun showPrivacyOptions() {
@@ -139,6 +210,7 @@ class MainActivity : ComponentActivity() {
         if (!allowed) {
             adsReady = false
             if (::adManager.isInitialized) adManager.clear()
+            if (::rewardedAdManager.isInitialized) rewardedAdManager.clear()
         } else if (!initializingAds) {
             initializingAds = true
             Thread {
@@ -146,12 +218,14 @@ class MainActivity : ComponentActivity() {
                     runOnUiThread {
                         adsReady = true
                         adManager.loadInterstitial()
+                        rewardedAdManager.load()
                     }
                 }
             }.start()
         } else {
             adsReady = true
             adManager.loadInterstitial()
+            rewardedAdManager.load()
         }
     }
 }
@@ -159,6 +233,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun StackFactoryApp(
     adManager: AdManager,
+    rewardedAdManager: RewardedAdManager,
     adsReady: Boolean,
     privacyRequired: Boolean,
     onPrivacyOptions: () -> Unit
@@ -228,6 +303,9 @@ private fun StackFactoryApp(
                 playing = false
             },
             onGameFinished = { adManager.recordGameFinished() },
+            onRewardedRecovery = { earned ->
+                if (adsReady) rewardedAdManager.show(earned)
+            },
             onProceedAfterGameOver = { action ->
                 if (adsReady) adManager.showIfDue(action) else action()
             }
@@ -363,11 +441,14 @@ fun StartScreen(
             )
         }
         if (showBanner) {
-            BannerAd(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-            )
+            Box(
+                modifier = Modifier.align(Alignment.BottomCenter)
+                    .fillMaxWidth().height(72.dp)
+                    .background(Color(0xFF101827)),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                BannerAd(modifier = Modifier.fillMaxWidth())
+            }
         }
     }
 }
@@ -375,8 +456,8 @@ fun StartScreen(
 @Composable
 private fun DailyMissionCard(mission: DailyMission, streak: Int) {
     val progress = (
-        mission.progress.toFloat() / mission.target.coerceAtLeast(1)
-    ).coerceIn(0f, 1f)
+            mission.progress.toFloat() / mission.target.coerceAtLeast(1)
+            ).coerceIn(0f, 1f)
 
     Column(
         modifier = Modifier
