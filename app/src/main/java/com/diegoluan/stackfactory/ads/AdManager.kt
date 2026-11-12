@@ -1,24 +1,44 @@
 package com.diegoluan.stackfactory.ads
 
 import android.app.Activity
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
-import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.AdError
+import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.FullScreenContentCallback
 import com.google.android.gms.ads.LoadAdError
 import com.google.android.gms.ads.interstitial.InterstitialAd
 import com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback
 
-/** Só mostra anúncios depois que o jogador decide sair da tela de derrota. */
+/** Pré-carrega o intersticial, mas só o exibe em transições naturais da partida. */
 class AdManager(private val activity: Activity) {
+    private val handler = Handler(Looper.getMainLooper())
     private var interstitial: InterstitialAd? = null
     private var loading = false
+    private var enabled = false
+    private var showing = false
     private var finishedGames = 0
     private var due = false
-    private var showing = false
+    private var lastShowAt = 0L
+    private var loadedAt = 0L
+    private var retry: Runnable? = null
+
+    // Evita mostrar anúncios em sequência se o jogador perder muito rápido.
+    private val minimumIntervalMs = 90_000L
+    private val reloadDelayMs = 45_000L
+    private val expirationMs = 55 * 60_000L
 
     fun loadInterstitial() {
-        if (loading || interstitial != null || showing) return
+        // Este método é chamado pelo MainActivity somente após canRequestAds().
+        enabled = true
+        if (loading || showing) return
+        // Criativos antigos são descartados antes de tentar reutilizá-los.
+        if (interstitial != null && SystemClock.elapsedRealtime() - loadedAt < expirationMs) return
+        interstitial = null
+        retry?.let(handler::removeCallbacks)
+        retry = null
         loading = true
         InterstitialAd.load(
             activity,
@@ -26,12 +46,20 @@ class AdManager(private val activity: Activity) {
             AdRequest.Builder().build(),
             object : InterstitialAdLoadCallback() {
                 override fun onAdLoaded(ad: InterstitialAd) {
+                    if (!enabled) return
                     loading = false
                     interstitial = ad
+                    loadedAt = SystemClock.elapsedRealtime()
+                    Log.d("StackFactoryAds", "Intersticial carregado")
                 }
+
                 override fun onAdFailedToLoad(error: LoadAdError) {
                     loading = false
-                    Log.w("StackFactoryAds", "Interstitial indisponível: ${error.message}")
+                    Log.w("StackFactoryAds", "Intersticial indisponível: ${error.code} / ${error.message}")
+                    if (!enabled) return
+                    val task = Runnable { loadInterstitial() }
+                    retry = task
+                    handler.postDelayed(task, reloadDelayMs)
                 }
             }
         )
@@ -39,43 +67,65 @@ class AdManager(private val activity: Activity) {
 
     fun recordGameFinished() {
         finishedGames++
-        if (finishedGames % AdConfig.GAMES_BETWEEN_ADS == 0) due = true
+        if (finishedGames >= AdConfig.GAMES_BETWEEN_ADS) {
+            due = true
+            if (enabled) loadInterstitial()
+        }
     }
 
     fun showIfDue(proceed: () -> Unit) {
-        if (!due || showing) {
-            if (!showing) proceed()
+        if (showing) return
+        val elapsed = SystemClock.elapsedRealtime() - lastShowAt
+        if (!enabled || !due || (lastShowAt != 0L && elapsed < minimumIntervalMs)) {
+            proceed()
             return
         }
-        due = false
+        if (interstitial != null && SystemClock.elapsedRealtime() - loadedAt >= expirationMs) {
+            interstitial = null
+        }
         val ad = interstitial
-        interstitial = null
         if (ad == null) {
-            proceed()
+            // Não bloqueia o jogador nem perde a oportunidade: fica pendente
+            // para a PRÓXIMA transição natural, caso um anúncio carregue.
             loadInterstitial()
+            proceed()
             return
         }
+        interstitial = null
         showing = true
-        var didProceed = false
-        fun complete() {
-            if (didProceed) return
-            didProceed = true
+        var completed = false
+        fun finish() {
+            if (completed) return
+            completed = true
             showing = false
-            proceed()
             loadInterstitial()
+            proceed()
         }
         ad.fullScreenContentCallback = object : FullScreenContentCallback() {
-            override fun onAdDismissedFullScreenContent() = complete()
-            override fun onAdFailedToShowFullScreenContent(adError: AdError) = complete()
+            override fun onAdShowedFullScreenContent() {
+                due = false
+                finishedGames = 0
+                lastShowAt = SystemClock.elapsedRealtime()
+                Log.d("StackFactoryAds", "Intersticial exibido")
+            }
+            override fun onAdDismissedFullScreenContent() = finish()
+            override fun onAdFailedToShowFullScreenContent(error: AdError) {
+                Log.w("StackFactoryAds", "Falha ao exibir intersticial: ${error.message}")
+                finish()
+            }
         }
-        try { ad.show(activity) } catch (exception: Exception) {
-            Log.w("StackFactoryAds", "Erro ao exibir interstitial", exception)
-            complete()
+        try { ad.show(activity) } catch (error: Exception) {
+            Log.w("StackFactoryAds", "Falha inesperada ao mostrar intersticial", error)
+            finish()
         }
     }
 
     fun clear() {
+        enabled = false
+        retry?.let(handler::removeCallbacks)
+        retry = null
         interstitial = null
         due = false
+        loading = false
     }
 }

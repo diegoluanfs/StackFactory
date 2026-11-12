@@ -84,7 +84,6 @@ fun GameScreen(
 
     val movingBlockYDp = 350.dp
 
-    val movementSpeedDp = 6.dp
 
     val cameraStartBlock = 5
     val cameraStepDp = 50.dp
@@ -120,6 +119,10 @@ fun GameScreen(
     var score by remember {
         mutableIntStateOf(0)
     }
+
+    // Velocidade inicial reduzida para permitir escolhas de cartas e progressão.
+    // A cada ponto, aumenta 0,06 dp/frame até o máximo de 5,8 dp/frame.
+    val movementSpeedDp = (2.2f + score.coerceAtMost(60) * 0.06f).dp
 
     var gameOver by remember {
         mutableStateOf(false)
@@ -396,6 +399,7 @@ fun GameScreen(
             isPaused,
             pickingSkill,
             slowBlocks,
+            score,
             gameWidthPx,
             movingBlockWidth
         ) {
