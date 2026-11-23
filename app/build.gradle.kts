@@ -1,7 +1,15 @@
 
 plugins {
+    id("com.google.firebase.crashlytics") version "3.0.8" apply false
+    id("com.google.gms.google-services") version "4.6.0" apply false
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+}
+
+// Firebase e opcional enquanto nao houver google-services.json.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+    apply(plugin = "com.google.firebase.crashlytics")
 }
 
 android {
@@ -17,9 +25,9 @@ android {
         minSdk = 24
         targetSdk = 37
 
-        // StackFactory - XP, Cartas e Skills
-        versionCode = 5
-        versionName = "1.3.0"
+        // StackFactory v1.5.0 - Lumis Wallet
+        versionCode = 6
+        versionName = "1.5.0"
 
         testInstrumentationRunner =
             "androidx.test.runner.AndroidJUnitRunner"
@@ -45,6 +53,20 @@ android {
 }
 
 dependencies {
+    implementation("com.google.firebase:firebase-crashlytics")
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.android.installreferrer:installreferrer:2.2")
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.zxing:core:3.5.4")
+    // Login Google (Credential Manager) — versão estável compatível com Kotlin 2.2.
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    // Firebase compatível com Kotlin 2.2
+    implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
+    // Google Play Games Services v2 - leaderboard e conquistas
+    implementation("com.google.android.gms:play-services-games-v2:22.1.0")
 
     // =========================================
     // JETPACK COMPOSE

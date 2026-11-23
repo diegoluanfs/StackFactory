@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "1052285708276",
+    "project_id": "stackfactory-67027",
+    "storage_bucket": "stackfactory-67027.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1052285708276:android:b23bbedabcd8723f043ba1",
+        "android_client_info": {
+          "package_name": "com.diegoluan.stackfactory"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1052285708276-2n0dccvo32h05tji8m8ucr62h8o3s7cq.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.diegoluan.stackfactory",
+            "certificate_hash": "f447f6f1581e5fada961fc2666fdfe3488262014"
+          }
+        },
+        {
+          "client_id": "1052285708276-e54rhpgjr6uctmkcj76kmv62bqpgraan.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.diegoluan.stackfactory",
+            "certificate_hash": "554b3a76afcf7d83a4a860fbdd93ba9f3897b201"
+          }
+        },
+        {
+          "client_id": "1052285708276-f4vnohrqcjaf9fvubd15rehn19ku1q6e.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAHLWlbaapyzkOzOa0LtLCMTcJc7yF3xMY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1052285708276-f4vnohrqcjaf9fvubd15rehn19ku1q6e.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

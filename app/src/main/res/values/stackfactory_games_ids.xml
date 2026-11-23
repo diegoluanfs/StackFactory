@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Substitua os valores "0" pelos IDs criados no Google Play Console. -->
+    <!-- Até configurar, o Play Games permanece desativado e o jogo funciona offline. -->
+    <string name="game_services_project_id" translatable="false">0</string>
+    <string name="stackfactory_leaderboard_id" translatable="false">0</string>
+    <string name="stackfactory_achievement_150" translatable="false">0</string>
+    <string name="stackfactory_achievement_500" translatable="false">0</string>
+    <string name="stackfactory_achievement_1000" translatable="false">0</string>
+</resources>

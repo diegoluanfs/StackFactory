@@ -1,6 +1,9 @@
 package com.diegoluan.stackfactory.game
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -36,9 +39,16 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -55,6 +65,190 @@ import com.diegoluan.stackfactory.game.skills.SkillCard
 import com.diegoluan.stackfactory.game.skills.SkillDeck
 import com.diegoluan.stackfactory.game.skills.SkillType
 
+// A paleta segue o ícone do StackFactory (de baixo para cima).
+// Apenas o desenho dos blocos utiliza estas cores; nenhuma regra do jogo depende delas.
+private val neonTowerColors = listOf(
+    Color(0xFF22F5A1), // Verde neon
+    Color(0xFF1DDCFF), // Ciano / azul
+    Color(0xFFFFC12B), // Dourado / laranja
+    Color(0xFFFF44D4)  // Magenta
+)
+
+/**
+ * Renderizador de blocos com aparência de vidro/neon, sem alterar a hitbox.
+ * Usa a mesma posição e largura calculadas pela mecânica já existente.
+ * O brilho, os relevos e o topo pseudo-3D são desenhados DENTRO do retângulo.
+ */
+private fun DrawScope.drawNeonStackBlock(
+    x: Float,
+    y: Float,
+    width: Float,
+    height: Float,
+    accent: Color,
+    isMoving: Boolean
+) {
+    if (width <= 0f || height <= 0f) return
+
+    val topLeft = Offset(x, y)
+    val bounds = Size(width, height)
+
+    // Blocos extremamente finos não devem perder visibilidade por causa do chanfro.
+    if (width < 4.dp.toPx()) {
+        drawRect(color = accent, topLeft = topLeft, size = bounds)
+        return
+    }
+
+    val radius = minOf(10.dp.toPx(), width * 0.18f, height * 0.22f)
+    val corner = CornerRadius(radius, radius)
+    val stroke = minOf(2.5.dp.toPx(), width * 0.13f, height * 0.12f)
+    val glow = minOf(5.dp.toPx(), width * 0.18f, height * 0.18f)
+    val bevel = minOf(9.dp.toPx(), width * 0.10f, height * 0.16f)
+    val topFaceHeight = minOf(height * 0.30f, 14.dp.toPx())
+
+    // Camada principal: corpo escuro com reflexo da cor neon.
+    drawRoundRect(
+        brush = Brush.linearGradient(
+            colors = listOf(
+                accent.copy(alpha = if (isMoving) 0.94f else 0.84f),
+                Color(0xFF12243D),
+                accent.copy(alpha = 0.62f)
+            ),
+            start = Offset(x, y),
+            end = Offset(x + width, y + height)
+        ),
+        topLeft = topLeft,
+        size = bounds,
+        cornerRadius = corner
+    )
+
+    // Volume e profundidade: área frontal inferior com leve sombra.
+    val frontTop = y + topFaceHeight
+    drawRect(
+        brush = Brush.verticalGradient(
+            colors = listOf(Color(0xFF071022).copy(alpha = 0.10f), Color(0xFF071022).copy(alpha = 0.52f)),
+            startY = frontTop,
+            endY = y + height
+        ),
+        topLeft = Offset(x + bevel, frontTop),
+        size = Size((width - 2f * bevel).coerceAtLeast(0f), (height - topFaceHeight - bevel).coerceAtLeast(0f))
+    )
+
+    // Faceta superior semelhante aos quatro blocos da arte do aplicativo.
+    val topFacet = Path().apply {
+        moveTo(x + bevel, y + bevel)
+        lineTo(x + width - bevel, y + bevel)
+        lineTo(x + width - bevel * 0.7f, y + topFaceHeight)
+        lineTo(x + bevel * 0.7f, y + topFaceHeight)
+        close()
+    }
+    drawPath(
+        path = topFacet,
+        brush = Brush.verticalGradient(
+            colors = listOf(accent.copy(alpha = 0.76f), accent.copy(alpha = 0.16f)),
+            startY = y,
+            endY = y + topFaceHeight
+        )
+    )
+
+    // Faceta lateral que dá leitura de bloco tridimensional.
+    if (width > 18.dp.toPx()) {
+        val sideWidth = minOf(10.dp.toPx(), width * 0.15f)
+        val sideFace = Path().apply {
+            moveTo(x + width - sideWidth, y + topFaceHeight)
+            lineTo(x + width - bevel * 0.5f, y + bevel)
+            lineTo(x + width - bevel * 0.5f, y + height - bevel)
+            lineTo(x + width - sideWidth, y + height - bevel)
+            close()
+        }
+        drawPath(sideFace, color = Color(0xFF061125).copy(alpha = 0.33f))
+    }
+
+    // Mantém o contorno inteiro DENTRO da hitbox: nas bordas do Canvas,
+    // nenhum lado perde metade do neon por recorte visual.
+    val glowCornerRadius = (radius - glow / 2f).coerceAtLeast(0f)
+    val strokeCornerRadius = (radius - stroke / 2f).coerceAtLeast(0f)
+    drawRoundRect(
+        color = accent.copy(alpha = if (isMoving) 0.32f else 0.21f),
+        topLeft = Offset(x + glow / 2f, y + glow / 2f),
+        size = Size((width - glow).coerceAtLeast(0f), (height - glow).coerceAtLeast(0f)),
+        cornerRadius = CornerRadius(glowCornerRadius, glowCornerRadius),
+        style = Stroke(width = glow)
+    )
+    drawRoundRect(
+        color = accent.copy(alpha = if (isMoving) 1f else 0.93f),
+        topLeft = Offset(x + stroke / 2f, y + stroke / 2f),
+        size = Size((width - stroke).coerceAtLeast(0f), (height - stroke).coerceAtLeast(0f)),
+        cornerRadius = CornerRadius(strokeCornerRadius, strokeCornerRadius),
+        style = Stroke(width = stroke)
+    )
+
+    // Friso luminoso no topo e detalhe de luz no canto, sem ampliar a geometria.
+    if (width > 22.dp.toPx()) {
+        drawLine(
+            color = Color.White.copy(alpha = if (isMoving) 0.90f else 0.64f),
+            start = Offset(x + bevel * 1.6f, y + bevel),
+            end = Offset(x + width - bevel * 1.6f, y + bevel),
+            strokeWidth = minOf(1.4.dp.toPx(), stroke)
+        )
+    }
+}
+
+/**
+ * Cenários progressivos — apenas visuais.
+ * A pontuação continua sendo calculada exclusivamente pela mecânica do jogo.
+ * Cada encaixe bem-sucedido vale um ponto e um novo bloco na torre.
+ */
+private enum class BackdropStage {
+    DEFAULT,
+    BRONZE,
+    SILVER,
+    GOLD;
+
+    companion object {
+        fun fromScore(score: Int): BackdropStage = when {
+            score >= 100 -> GOLD
+            score >= 75 -> SILVER
+            score >= 40 -> BRONZE
+            else -> DEFAULT
+        }
+    }
+}
+
+private data class BackdropPalette(
+    val top: Color,
+    val middle: Color,
+    val bottom: Color,
+    val glow: Color
+)
+
+/** Paletas escuras para preservar a leitura do HUD branco sobre o cenário. */
+private fun backdropPalette(stage: BackdropStage): BackdropPalette = when (stage) {
+    BackdropStage.DEFAULT -> BackdropPalette(
+        Color.Transparent,
+        Color.Transparent,
+        Color.Transparent,
+        Color.Transparent
+    )
+    BackdropStage.BRONZE -> BackdropPalette(
+        Color(0xFFA35B30).copy(alpha = 0.71f),
+        Color(0xFF5A331F).copy(alpha = 0.63f),
+        Color(0xFF2D1D19).copy(alpha = 0.83f),
+        Color(0xFFF7A65B).copy(alpha = 0.33f)
+    )
+    BackdropStage.SILVER -> BackdropPalette(
+        Color(0xFF9BB6CE).copy(alpha = 0.57f),
+        Color(0xFF58738E).copy(alpha = 0.64f),
+        Color(0xFF1C2F46).copy(alpha = 0.83f),
+        Color(0xFFD9EBFF).copy(alpha = 0.29f)
+    )
+    BackdropStage.GOLD -> BackdropPalette(
+        Color(0xFFE3A83D).copy(alpha = 0.72f),
+        Color(0xFF997022).copy(alpha = 0.69f),
+        Color(0xFF392609).copy(alpha = 0.87f),
+        Color(0xFFFFE18A).copy(alpha = 0.38f)
+    )
+}
+
 private data class TowerBlock(
     val x: Float,
     val width: Float
@@ -64,14 +258,21 @@ private data class TowerBlock(
 fun GameScreen(
     onMissionUpdated: () -> Unit = {},
     onBackToMenu: () -> Unit,
-    onGameFinished: () -> Unit = {},
+    onGameFinished: (Int) -> Unit = {},
+    onScoreChanged: (Int) -> Unit = {},
     onProceedAfterGameOver: (() -> Unit) -> Unit = { proceed -> proceed() },
-    onRewardedRecovery: (onEarned: () -> Unit) -> Unit = {}
+    onRewardedRecovery: (onEarned: () -> Unit) -> Unit = {},
+    onBlockPlaced: () -> Unit = {},
+    onGameRestarted: () -> Unit = {},
+    onSkillSelected: (String) -> Unit = {}
 ) {
 
     val context = LocalContext.current
     val missionManager = remember(context) { DailyMissionManager(context) }
     val density = LocalDensity.current
+    // A largura real do Canvas é a referência única para as bordas e colisões.
+    // O cálculo por padding serve apenas até a primeira medição do layout.
+    var measuredCanvasWidthPx by remember { mutableFloatStateOf(0f) }
 
     /*
      * =========================================================
@@ -82,8 +283,12 @@ fun GameScreen(
     val blockWidthDp = 180.dp
     val blockHeightDp = 50.dp
 
-    val movingBlockYDp = 350.dp
-
+    // Posição intermediária: mais baixa que a versão anterior (150.dp),
+    // porém ainda acima da posição original (350.dp).
+    // Em telas compactas, mantém distância da torre quando há espaço.
+    val preferredMovingBlockYDp = 250.dp
+    val movingBlockTowerGapDp = 24.dp
+    val movingBlockTopMarginDp = 12.dp
 
     val cameraStartBlock = 5
     val cameraStepDp = 50.dp
@@ -124,9 +329,38 @@ fun GameScreen(
     // A cada ponto, aumenta 0,06 dp/frame até o máximo de 5,8 dp/frame.
     val movementSpeedDp = (2.2f + score.coerceAtMost(60) * 0.06f).dp
 
+    // A troca de cenário só reage à pontuação. Não modifica movimento ou hitbox.
+    val backdropStage = BackdropStage.fromScore(score)
+    val backdrop = backdropPalette(backdropStage)
+    val backdropTop by animateColorAsState(
+        targetValue = backdrop.top,
+        animationSpec = tween(durationMillis = 1100),
+        label = "stackfactory-backdrop-top"
+    )
+    val backdropMiddle by animateColorAsState(
+        targetValue = backdrop.middle,
+        animationSpec = tween(durationMillis = 1100),
+        label = "stackfactory-backdrop-middle"
+    )
+    val backdropBottom by animateColorAsState(
+        targetValue = backdrop.bottom,
+        animationSpec = tween(durationMillis = 1100),
+        label = "stackfactory-backdrop-bottom"
+    )
+    val backdropGlow by animateColorAsState(
+        targetValue = backdrop.glow,
+        animationSpec = tween(durationMillis = 1100),
+        label = "stackfactory-backdrop-glow"
+    )
+
     var gameOver by remember {
         mutableStateOf(false)
     }
+
+    // O fim temporário com opção de anúncio premiado NÃO conclui uma partida.
+    // A contagem ocorre somente na transição definitiva para menu/reinício.
+    val gameSessionCompletion = remember { GameSessionCompletion() }
+    var exitPending by remember { mutableStateOf(false) }
 
     var isPaused by remember {
         mutableStateOf(false)
@@ -227,12 +461,6 @@ fun GameScreen(
     val primaryColor =
         Color(0xFF2563EB)
 
-    val blockColor =
-        Color(0xFF60A5FA)
-
-    val movingBlockColor =
-        Color(0xFF2563EB)
-
     val textPrimary =
         Color(0xFF0F172A)
 
@@ -262,6 +490,8 @@ fun GameScreen(
         cardChoices = emptyList()
 
         gameOver = false
+        gameSessionCompletion.reset()
+        exitPending = false
 
         isPaused = false
 
@@ -296,6 +526,7 @@ fun GameScreen(
                 }
             )
         )
+        onGameRestarted()
     }
 
     /*
@@ -338,11 +569,15 @@ fun GameScreen(
             }
 
         /*
-         * Largura real da área de jogo.
+         * Limites horizontais: 0 até a borda direita real do Canvas.
+         * Medir o Canvas remove discrepâncias de arredondamento e insets
+         * entre a largura estimada do Box e a área efetivamente desenhada.
          */
-        val gameWidthPx =
-            totalWidthPx -
-                    horizontalPaddingPx
+        val gameWidthPx = if (measuredCanvasWidthPx > 0f) {
+            measuredCanvasWidthPx
+        } else {
+            (totalWidthPx - horizontalPaddingPx).coerceAtLeast(0f)
+        }
 
         /*
          * Largura original do bloco.
@@ -376,16 +611,39 @@ fun GameScreen(
         )
 
         /*
-         * Overlay escuro sutil.
+         * CENÁRIOS POR PONTUAÇÃO
+         * Padrão (0–39), Bronze (40–74), Prata (75–99), Ouro (100+).
+         *
+         * As duas camadas são desenhadas ATRÁS do HUD e do Canvas.
+         * A imagem de fundo original permanece a mesma; o gradiente muda
+         * apenas a ambientação, com transição de 1,1 segundo.
          */
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
-                    Color.Black.copy(
-                        alpha = 0.10f
+                    Brush.verticalGradient(
+                        colors = listOf(backdropTop, backdropMiddle, backdropBottom)
                     )
                 )
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(backdropGlow, Color.Transparent),
+                        center = Offset(totalWidthPx * 0.5f, 0f),
+                        radius = totalWidthPx.coerceAtLeast(1f)
+                    )
+                )
+        )
+
+        // Contraste mínimo do cenário para os textos e os blocos neon.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.10f))
         )
 
         /*
@@ -488,6 +746,36 @@ fun GameScreen(
          * =====================================================
          */
 
+        // Uma unica conclusao logica por partida (inclusive quando o jogador
+        // volta ao menu ou reinicia antes de perder). Mantem metas e telemetria.
+        fun completeGameOnce() {
+            gameSessionCompletion.completeOnce {
+                missionManager.onGameFinished()
+                onMissionUpdated()
+                onGameFinished(score)
+            }
+        }
+
+        fun leaveActiveGame() {
+            if (gameOver || exitPending) return
+            exitPending = true
+            completeGameOnce()
+            onBackToMenu()
+        }
+
+        fun leaveFinishedGame(action: () -> Unit) {
+            if (!gameOver || exitPending) return
+            exitPending = true
+            completeGameOnce()
+            onProceedAfterGameOver(action)
+        }
+
+        // Voltar do Android abre a pausa; o usuario decide se sai.
+        BackHandler(enabled = !exitPending) {
+            if (gameOver) leaveFinishedGame(onBackToMenu)
+            else isPaused = true
+        }
+
         fun placeBlock() {
 
             /*
@@ -581,10 +869,9 @@ fun GameScreen(
                     lives--
                 }
                 if (lives <= 0) {
+                    // Ainda é possível continuar pelo anúncio premiado.
+                    // Não registrar partida concluída neste ponto.
                     gameOver = true
-                    missionManager.onGameFinished()
-                    onMissionUpdated()
-                    onGameFinished()
                 } else {
                     // Errou, mas a partida não acaba: bloco volta ao início.
                     movingBlockX = 0f
@@ -652,6 +939,11 @@ fun GameScreen(
              */
 
             score++
+            // Observadores de ranking e check-in; não alteram a pontuação.
+            onScoreChanged(score)
+            // Apenas feedback sonoro após o encaixe válido.
+            // Não altera física, colisão, velocidade, pontuação ou câmera.
+            onBlockPlaced()
             if (slowBlocks > 0) slowBlocks--
             // Encaixe próximo da largura anterior recebe bônus de precisão.
             val earnedXp = 10 + xpBonus +
@@ -741,6 +1033,7 @@ fun GameScreen(
                 SkillType.WIDTH_INSURANCE -> widthRecoveryCharges++
             }
             pickingSkill = false
+            onSkillSelected(card.type.name)
         }
 
         /*
@@ -903,9 +1196,15 @@ fun GameScreen(
                             )
                             .clickable {
 
-                                restartGame(
-                                    gameWidthPx
-                                )
+                                if (!exitPending) {
+                                    if (gameOver) {
+                                        leaveFinishedGame { restartGame(gameWidthPx) }
+                                    } else {
+                                        // Reiniciar tambem encerra a partida anterior.
+                                        completeGameOnce()
+                                        restartGame(gameWidthPx)
+                                    }
+                                }
                             },
                         contentAlignment =
                             Alignment.Center
@@ -986,8 +1285,15 @@ fun GameScreen(
                  */
 
                 Canvas(
-                    modifier =
-                        Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .onSizeChanged { canvasSize ->
+                            // Mesma largura usada para mover, posicionar e colidir.
+                            val actualWidth = canvasSize.width.toFloat()
+                            if (actualWidth > 0f && actualWidth != measuredCanvasWidthPx) {
+                                measuredCanvasWidthPx = actualWidth
+                            }
+                        }
                 ) {
 
                     val centerX =
@@ -1013,30 +1319,23 @@ fun GameScreen(
                                             ) +
                                     cameraOffset
 
+                        // Evita renderizar blocos fora do viewport; a torre,
+                        // a hitbox, o score e a camera permanecem intactos.
+                        if (y + blockHeightPx < 0f || y > size.height) {
+                            return@forEachIndexed
+                        }
+
                         val x =
                             centerX +
                                     block.x
 
-                        drawRect(
-                            color =
-                                blockColor,
-                            topLeft =
-                                Offset(
-                                    x =
-                                        x -
-                                                block.width /
-                                                2f,
-                                    y = y
-                                ),
-                            size =
-                                androidx.compose.ui
-                                    .geometry
-                                    .Size(
-                                        width =
-                                            block.width,
-                                        height =
-                                            blockHeightPx
-                                    )
+                        drawNeonStackBlock(
+                            x = x - block.width / 2f,
+                            y = y,
+                            width = block.width,
+                            height = blockHeightPx,
+                            accent = neonTowerColors[index % neonTowerColors.size],
+                            isMoving = false
                         )
                     }
 
@@ -1045,31 +1344,25 @@ fun GameScreen(
                      * BLOCO MÓVEL
                      * =================================================
                      *
-                     * movingBlockX = lado esquerdo.
-                     *
-                     * movingBlockWidth = largura atual.
+                     * A altura da barra é apenas visual: a lógica de
+                     * posicionamento horizontal e colisão permanece igual.
+                     * No espaço disponível, evita que a barra seja desenhada
+                     * sobre o último bloco da torre em telas menores.
                      */
+                    val towerTopY = size.height -
+                        towerBlocks.size * blockHeightPx + cameraOffset
+                    val movingBlockY = min(
+                        preferredMovingBlockYDp.toPx(),
+                        towerTopY - blockHeightPx - movingBlockTowerGapDp.toPx()
+                    ).coerceAtLeast(movingBlockTopMarginDp.toPx())
 
-                    drawRect(
-                        color =
-                            movingBlockColor,
-                        topLeft =
-                            Offset(
-                                x =
-                                    movingBlockX,
-                                y =
-                                    movingBlockYDp
-                                        .toPx()
-                            ),
-                        size =
-                            androidx.compose.ui
-                                .geometry
-                                .Size(
-                                    width =
-                                        movingBlockWidth,
-                                    height =
-                                        blockHeightPx
-                                )
+                    drawNeonStackBlock(
+                        x = movingBlockX,
+                        y = movingBlockY,
+                        width = movingBlockWidth,
+                        height = blockHeightPx,
+                        accent = neonTowerColors[towerBlocks.size % neonTowerColors.size],
+                        isMoving = true
                     )
                 }
 
@@ -1120,14 +1413,31 @@ fun GameScreen(
                             )
 
                             Text(
-                                text =
-                                    "Toque em continuar para voltar",
-                                color =
-                                    Color.White.copy(
-                                        alpha = 0.80f
-                                    ),
+                                text = "A partida fica pausada ate voce continuar.",
+                                color = Color.White.copy(alpha = 0.80f),
                                 fontSize = 14.sp
                             )
+
+                            Spacer(Modifier.height(22.dp))
+                            Button(
+                                enabled = !exitPending,
+                                onClick = { isPaused = false }
+                            ) {
+                                Text("CONTINUAR", fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            OutlinedButton(
+                                enabled = !exitPending,
+                                onClick = { leaveActiveGame() },
+                                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.70f))
+                            ) {
+                                Text("VOLTAR AO MENU", color = Color.White,
+                                    fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Text("Sair encerra a partida atual.",
+                                color = Color.White.copy(alpha = 0.68f),
+                                fontSize = 12.sp)
                         }
                     }
                 }
@@ -1236,6 +1546,7 @@ fun GameScreen(
 
                             if (!rewardedContinueUsed) {
                                 OutlinedButton(
+                                    enabled = !exitPending,
                                     onClick = {
                                         onRewardedRecovery {
                                             rewardedContinueUsed = true
@@ -1257,8 +1568,9 @@ fun GameScreen(
                             }
 
                             Button(
+                                enabled = !exitPending,
                                 onClick = {
-                                    onProceedAfterGameOver {
+                                    leaveFinishedGame {
                                         restartGame(gameWidthPx)
                                     }
                                 },
@@ -1287,7 +1599,8 @@ fun GameScreen(
                             )
 
                             OutlinedButton(
-                                onClick = { onProceedAfterGameOver(onBackToMenu) },
+                                enabled = !exitPending,
+                                onClick = { leaveFinishedGame(onBackToMenu) },
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(14.dp),
                                 border = BorderStroke(
