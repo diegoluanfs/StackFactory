@@ -26,8 +26,8 @@ android {
         targetSdk = 37
 
         // StackFactory v1.5.0 - Lumis Wallet
-        versionCode = 6
-        versionName = "1.5.0"
+        versionCode = 8
+        versionName = "1.8.1"
 
         testInstrumentationRunner =
             "androidx.test.runner.AndroidJUnitRunner"
@@ -35,6 +35,10 @@ android {
 
     buildTypes {
         release {
+            ndk { debugSymbolLevel = "SYMBOL_TABLE" }
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            isShrinkResources = true
+            isMinifyEnabled = true
             // Mantemos a configuração já validada
             optimization {
                 enable = false

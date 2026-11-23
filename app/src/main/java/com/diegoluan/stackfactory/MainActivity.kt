@@ -86,6 +86,7 @@ import com.diegoluan.stackfactory.lumis.LumisRepository
 import com.diegoluan.stackfactory.lumis.LumisSnapshot
 import com.diegoluan.stackfactory.lumis.LumisWalletCard
 import com.diegoluan.stackfactory.telemetry.StackTelemetry
+import com.diegoluan.stackfactory.account.AccountDeletionDialog
 import com.diegoluan.stackfactory.auth.StackAuthController
 import com.diegoluan.stackfactory.auth.StackAuthGate
 import com.diegoluan.stackfactory.cloud.PlayerProgressCloud
@@ -579,6 +580,7 @@ fun StartScreen(
     var statsInfoOpen by remember { mutableStateOf(false) }
     var referralOpen by remember { mutableStateOf(false) }
     var signOutConfirmOpen by remember { mutableStateOf(false) }
+    var deleteAccountDialogOpen by remember { mutableStateOf(false) }
     val accountMenuWidth = (configuration.screenWidthDp - 32).coerceIn(220, 320).dp
     BackHandler(enabled = accountMenuOpen) {
         if (statsInfoOpen) statsInfoOpen = false else accountMenuOpen = false
@@ -922,8 +924,14 @@ fun StartScreen(
                     }) { Text("Sair", color = Color(0xFFFFC48D)) }
                 },
                 dismissButton = {
-                    TextButton(onClick = { signOutConfirmOpen = false }) {
-                        Text("Cancelar", color = Color(0xFF68E6FF))
+                    Column(horizontalAlignment = Alignment.End) {
+                        TextButton(onClick = {
+                            signOutConfirmOpen = false
+                            deleteAccountDialogOpen = true
+                        }) { Text("Excluir conta", color = Color(0xFFFFBDBD)) }
+                        TextButton(onClick = { signOutConfirmOpen = false }) {
+                            Text("Cancelar", color = Color(0xFF68E6FF))
+                        }
                     }
                 },
                 containerColor = Color(0xFF12203A),
@@ -932,6 +940,12 @@ fun StartScreen(
             )
         }
 
+        if (deleteAccountDialogOpen && referralUid != null) {
+            AccountDeletionDialog(
+                uid = referralUid,
+                onDismiss = { deleteAccountDialogOpen = false }
+            )
+        }
         if (referralOpen && referralUid != null) {
             com.diegoluan.stackfactory.referral.ReferralDialog(
                 uid = referralUid,
